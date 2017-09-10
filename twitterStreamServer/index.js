@@ -1,46 +1,67 @@
 // Require our dependencies
 const express = require('express');
 const http = require('http');
-const Twitter = require('ntwitter');
+const Twitter = require('twitter');
 const config = require('./config');
-const streamHandler = require('./streamHandler');
+const Influx = require('influx');
+const Moment = require('moment');
+const Sentiment = require('sentiment');
+const Geohash = require('latlon-geohash');
 
 // Create an express instance and set a port variable
 const app = express();
 const port = process.env.PORT || 8081;
 
-// Set handlebars as the templating engine
-// app.engine('handlebars', exphbs({ defaultLayout: 'main'}));
-// app.set('view engine', 'handlebars');
-
-// Disable etag headers on responses
 app.disable('etag');
 
-// Connect to our mongo database
-// mongoose.connect('mongodb://localhost/react-tweets');
-
-// Create a new ntwitter instance
 const twit = new Twitter(config.twitter);
 
-// Index Route
-// app.get('/', routes.index);
-
-// Page Route
-// app.get('/page/:page/:skip', routes.page);
-
-// Set /public as our static content dir
-// app.use("/", express.static(__dirname + "/public/"));
-
-// Fire it up (start our server)
 const server = http.createServer(app).listen(port, () => {
   console.log('Express server listening on port ' + port);
 });
 
-// Initialize socket.io
-const io = require('socket.io').listen(server);
+function epochNow() {
+  const now = new Moment();
+  // TODO REPLACE WITH ACTUAL TWEET DATA
+  return now.unix() * 1000 * 1000 * 1000;
+}
 
-// Set a stream listener for tweets matching tracking keywords
-twit.stream('statuses/filter', { locations: '-18.98,32.20,37.08,70.36' }, (stream) => {
-  console.log('Ive got a stream, ROPOPO');
-  streamHandler(stream, io);
-});
+const streamHandler = (stream) => {
+  const influx = new Influx.InfluxDB({
+    host: 'localhost',
+    database: 'derp'
+  });
+
+  stream.on('data', (data) => {
+    if (data.coordinates) {
+      const sentimentScore = Sentiment(data.text).score;
+      if (sentimentScore !== 0) {
+        const points = [
+          {
+            measurement: 'tweet',
+            tags: {
+              id: data.id,
+              geohash: Geohash.encode(data.coordinates.coordinates[1], data.coordinates.coordinates[0])
+            },
+            fields: {
+              value: 1,
+              sentiment: Sentiment(data.text).score
+            },
+            timestamp: epochNow()
+          }
+        ];
+
+        influx.writePoints(points).then((res) => {
+          console.log('succesfully saved data');
+        });
+      }
+    }
+  });
+
+  stream.on('error', (error) => {
+    console.error(error);
+    throw error;
+  });
+};
+
+twit.stream('statuses/filter', { locations: '-18.98,32.20,37.08,70.36' }, streamHandler);
