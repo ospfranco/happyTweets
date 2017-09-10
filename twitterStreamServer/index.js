@@ -20,12 +20,6 @@ const server = http.createServer(app).listen(port, () => {
   console.log('Express server listening on port ' + port);
 });
 
-function epochNow() {
-  const now = new Moment();
-  // TODO REPLACE WITH ACTUAL TWEET DATA
-  return now.unix() * 1000 * 1000 * 1000;
-}
-
 const streamHandler = (stream) => {
   const influx = new Influx.InfluxDB({
     host: 'localhost',
@@ -33,6 +27,9 @@ const streamHandler = (stream) => {
   });
 
   stream.on('data', (data) => {
+    const now = new Moment();
+    const milliNow = now.unix() * 1000 * 1000 * 1000;
+
     if (data.coordinates) {
       const sentimentScore = Sentiment(data.text).score;
       if (sentimentScore !== 0) {
@@ -47,12 +44,12 @@ const streamHandler = (stream) => {
               value: 1,
               sentiment: Sentiment(data.text).score
             },
-            timestamp: epochNow()
+            timestamp: milliNow
           }
         ];
 
         influx.writePoints(points).then((res) => {
-          console.log('succesfully saved data');
+          console.log(now.toString() + ' Inserted Tweet');
         });
       }
     }
